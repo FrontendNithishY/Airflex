@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AirType</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+:root{
+  --bg:#08080f;--surface:#0f0f1a;--panel:#161625;
+  --border:#ffffff0e;--accent:#6c63ff;--green:#00e676;
+  --red:#ff453a;--yellow:#ffd60a;--teal:#00e5aa;
+  --text:#f0f0ff;--dim:#5a5a7a;
+  --key-bg:#1c1c30;--key-bd:#2a2a4a;--key-hv:#252548;--key-pr:#6c63ff;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none;}
+
+/* BAR */
+#bar{display:flex;align-items:center;gap:8px;padding:7px 14px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;}
+.logo{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:.9rem;background:linear-gradient(135deg,#6c63ff,#ff63a5);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.tabs{display:flex;gap:3px;background:var(--panel);border-radius:7px;padding:3px;}
+.tab{padding:4px 12px;border-radius:5px;border:none;background:transparent;color:var(--dim);font-family:'Inter',sans-serif;font-size:.7rem;font-weight:500;cursor:pointer;transition:all .12s;}
+.tab.on{background:var(--accent);color:#fff;}
+#chip{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--border);border-radius:20px;padding:4px 11px;font-size:.67rem;color:var(--dim);min-width:165px;}
+#chip .dot{width:7px;height:7px;border-radius:50%;background:#2a2a4a;flex-shrink:0;transition:all .1s;}
+.hand .dot{background:var(--yellow);box-shadow:0 0 6px #ffd60a99;}
+.tap  .dot{background:var(--green); box-shadow:0 0 8px #00e67699;}
+.eye  .dot{background:var(--teal);  box-shadow:0 0 7px #00e5aa99;}
+.dwell .dot{background:var(--teal); box-shadow:0 0 10px #00e5aacc;}
+.bspc  .dot{background:var(--red);  box-shadow:0 0 6px #ff453a88;}
+.spc   .dot{background:var(--accent);box-shadow:0 0 6px #6c63ff88;}
+.ml{margin-left:auto;display:flex;gap:5px;}
+.btn{height:25px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--dim);cursor:pointer;font-size:.67rem;font-family:'Inter',sans-serif;display:flex;align-items:center;gap:4px;transition:all .12s;white-space:nowrap;}
+.btn:hover{border-color:var(--accent);color:var(--text);}
+.btn.r:hover{border-color:var(--red);color:var(--red);}
+
+/* MAIN */
+main{flex:1;display:flex;overflow:hidden;}
+#board{flex:1;display:flex;flex-direction:column;padding:10px 14px 8px;gap:7px;overflow:hidden;}
+
+/* OUTPUT */
+#out{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 14px;min-height:64px;max-height:105px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:1rem;color:var(--text);line-height:1.6;word-break:break-all;flex-shrink:0;transition:border-color .15s;}
+#out.fl{border-color:#6c63ff66;}
+#caret{display:inline-block;width:2px;height:1em;background:var(--accent);vertical-align:middle;margin-left:1px;animation:blink 1s step-end infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+#cc{font-size:.58rem;color:var(--dim);font-family:'JetBrains Mono',monospace;text-align:right;}
+
+/* KEYBOARD */
+#kbwrap{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;}
+#dotCvs{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:10;}
+#kb{display:flex;flex-direction:column;gap:5px;z-index:1;}
+.row{display:flex;gap:4px;justify-content:center;}
+.key{position:relative;min-width:47px;height:47px;background:var(--key-bg);border:2px solid var(--key-bd);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;transition:background .07s,border-color .07s,transform .06s,box-shadow .07s;}
+.key .kc{font-family:'JetBrains Mono',monospace;font-size:.84rem;font-weight:600;color:var(--text);line-height:1;pointer-events:none;}
+.key .ks{font-size:.44rem;color:var(--dim);pointer-events:none;margin-top:1px;}
+.key.w2{min-width:74px;}.key.w3{min-width:94px;}
+.key.sp{min-width:240px;}.key.bs{min-width:84px;}.key.en{min-width:92px;}
+.key.hov{background:var(--key-hv);border-color:var(--accent);box-shadow:0 0 10px #6c63ff44;transform:scale(1.07);}
+.key.hov-e{background:#0a1f1a;border-color:var(--teal);box-shadow:0 0 12px #00e5aa44;transform:scale(1.07);}
+.key.fired{background:var(--key-pr);border-color:var(--accent);box-shadow:0 0 20px #6c63ffaa;transform:scale(.93);}
+.key.fired .kc{color:#fff;}
+.key .dbar{position:absolute;bottom:0;left:0;height:3px;width:0%;background:var(--teal);border-radius:0 0 6px 6px;}
+
+/* SIDE */
+#side{width:290px;flex-shrink:0;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;transition:width .25s,opacity .25s;overflow:hidden;}
+#side.off{width:0;opacity:0;}
+
+/* CAMERA BOX — single shared */
+#cambox{position:relative;width:100%;aspect-ratio:4/3;background:#111;flex-shrink:0;overflow:hidden;}
+/* THE video element — always visible once started */
+#camVid{width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1);}
+/* Overlay canvas for skeleton/iris drawing */
+#camOv{position:absolute;inset:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none;}
+/* Start gate */
+#camGate{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;background:rgba(8,8,15,.93);text-align:center;padding:14px;transition:opacity .3s;}
+#camGate.off{opacity:0;pointer-events:none;}
+.gi{font-size:1.6rem;}.gtitle{color:var(--text);font-size:.78rem;font-weight:600;}
+.gsub{font-size:.67rem;color:var(--dim);line-height:1.5;}
+.sbtn{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:7px 16px;font-family:'Inter',sans-serif;font-size:.73rem;font-weight:500;cursor:pointer;transition:background .12s;}
+.sbtn:hover{background:#5a52e0;}
+
+.sep{height:1px;background:var(--border);}
+.infobox{padding:7px 11px;}
+.infolbl{font-size:.57rem;color:var(--dim);margin-bottom:3px;}
+.infoval{font-family:'JetBrains Mono',monospace;font-size:.62rem;color:var(--accent);}
+.mbar{padding:7px 11px;}
+.mbarlbl{font-size:.57rem;color:var(--dim);margin-bottom:3px;}
+.mtrack{height:5px;background:var(--border);border-radius:99px;overflow:hidden;position:relative;}
+.mfill{height:100%;width:0%;border-radius:99px;transition:width .04s;}
+.mthresh{position:absolute;top:0;bottom:0;width:2px;background:#ffd60a88;border-radius:1px;}
+.dwell-row{padding:7px 11px;}
+.dlbl{font-size:.57rem;color:var(--dim);margin-bottom:3px;display:flex;justify-content:space-between;}
+.dtrack{height:7px;background:var(--border);border-radius:99px;overflow:hidden;}
+.dfill{height:100%;width:0%;background:linear-gradient(90deg,var(--teal),#00b894);border-radius:99px;transition:width .05s;}
+.guide{padding:7px 11px;display:flex;flex-direction:column;gap:4px;}
+.ghd{font-size:.57rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:2px;}
+.gr{display:flex;align-items:center;gap:6px;padding:5px 7px;background:var(--panel);border:1px solid var(--border);border-radius:6px;font-size:.64rem;}
+.gr .em{font-size:.8rem;flex-shrink:0;}
+.gr .gt{color:var(--dim);line-height:1.3;}
+.gr .gt b{color:var(--text);}
+
+/* Eye mode extras */
+#eyeExtras{display:none;}
+
+/* Gaze dot */
+#gd{position:fixed;width:14px;height:14px;border-radius:50%;background:radial-gradient(circle,#ff453acc,#ff453a22);border:2px solid #ff453aaa;pointer-events:none;z-index:300;transform:translate(-50%,-50%);display:none;
+  transition:left 0.06s linear, top 0.06s linear;
+}
+
+/* Toast */
+#toast{position:fixed;bottom:11px;left:50%;transform:translateX(-50%) translateY(46px);background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.71rem;color:var(--text);z-index:999;pointer-events:none;transition:transform .2s cubic-bezier(.34,1.56,.64,1);white-space:nowrap;box-shadow:0 4px 18px rgba(0,0,0,.6);}
+#toast.show{transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+
+<div id="bar">
+  <div class="logo">⌨ AirType</div>
+  <div class="tabs">
+    <button class="tab on" id="tH" onclick="setMode('hand')">🤚 Hand</button>
+    <button class="tab"    id="tE" onclick="setMode('eye')">👁 Eye</button>
+  </div>
+  <div id="chip"><div class="dot"></div><span id="ctxt">—</span></div>
+  <div class="ml">
+    <button class="btn" id="camBtn" onclick="toggleCam()">👁 Hide Cam</button>
+    <button class="btn" id="copyBtn">📋 Copy</button>
+    <button class="btn r" id="clearBtn">🗑 Clear</button>
+  </div>
+</div>
+
+<main>
+  <div id="board">
+    <div id="out"><span id="txt"></span><span id="caret"></span></div>
+    <div id="cc">0 chars</div>
+    <div id="kbwrap">
+      <canvas id="dotCvs"></canvas>
+      <div id="kb"></div>
+    </div>
+  </div>
+
+  <div id="side">
+    <!-- ONE camera box used by both modes -->
+    <div id="cambox">
+      <video id="camVid" autoplay playsinline muted></video>
+      <canvas id="camOv"></canvas>
+      <div id="camGate">
+        <div class="gi">🎥</div>
+        <div class="gtitle">Enable Camera</div>
+        <div class="gsub" id="gateSubtxt">Tap detection for hand mode,<br>iris tracking for eye mode.</div>
+        <button class="sbtn" id="startBtn">Start Camera</button>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- Hand info (shown in hand mode) -->
+    <div id="handInfo">
+      <div class="infobox">
+        <div class="infolbl">Hand confidence</div>
+        <div class="mtrack"><div class="mfill" id="handConf" style="background:linear-gradient(90deg,var(--accent),#ff63a5);"></div></div>
+      </div>
+      <div class="sep"></div>
+      <div class="mbar">
+        <div class="mbarlbl">Tap velocity</div>
+        <div class="mtrack"><div class="mfill" id="tapFill" style="background:var(--green);"></div><div class="mthresh" id="tapThr"></div></div>
+      </div>
+      <div class="sep"></div>
+      <div class="infobox">
+        <div class="infolbl">Fingertip</div>
+        <div class="infoval" id="fPos">x: — y: —</div>
+      </div>
+      <div class="sep"></div>
+      <div class="guide">
+        <div class="ghd">Gestures</div>
+        <div class="gr"><span class="em">☝️</span><span class="gt"><b>Hover</b> index up</span></div>
+        <div class="gr"><span class="em">👇</span><span class="gt"><b>Tap</b> quick flick down</span></div>
+        <div class="gr"><span class="em">✌️</span><span class="gt"><b>Space</b> 2 fingers (right hand)</span></div>
+        <div class="gr"><span class="em">🖐</span><span class="gt"><b>Backspace</b> 5 fingers (right hand)</span></div>
+      </div>
+    </div>
+
+    <!-- Eye info (shown in eye mode) -->
+    <div id="eyeInfo" style="display:none;">
+      <div class="dwell-row">
+        <div class="dlbl"><span>Dwell progress</span><span id="dwPct">0%</span></div>
+        <div class="dtrack"><div class="dfill" id="dwFill"></div></div>
+      </div>
+      <div class="sep"></div>
+      <div class="infobox">
+        <div class="infolbl">Gaze position</div>
+        <div class="infoval" id="gPos">x: — y: —</div>
+      </div>
+      <div class="sep"></div>
+      <div class="infobox">
+        <div class="infolbl">Iris offset (raw)</div>
+        <div class="infoval" id="iOff">dx: — dy: —</div>
+      </div>
+      <div class="sep"></div>
+      <div class="guide">
+        <div class="ghd">Eye Controls</div>
+        <div class="gr"><span class="em">👁</span><span class="gt"><b>Look at key</b> highlights it</span></div>
+        <div class="gr"><span class="em">😉</span><span class="gt"><b>Blink</b> → types hovered key</span></div>
+        <div class="gr"><span class="em">⏱</span><span class="gt"><b>Hold gaze 1.2s</b> → also types</span></div>
+        <div class="gr"><span class="em">👈</span><span class="gt"><b>Look far left</b> → Backspace</span></div>
+        <div class="gr"><span class="em">👉</span><span class="gt"><b>Look far right</b> → Space</span></div>
+        <div class="gr"><span class="em">🔴</span><span class="gt"><b>Red dot</b> = your gaze point</span></div>
+        <button class="sbtn" style="margin-top:4px;width:100%;background:#00897b;" id="calBtn" onclick="startCal()">🎯 Calibrate Eyes</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="gd"></div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+// ══════════════════════════════
+// KEYBOARD
+// ══════════════════════════════
+const ROWS=[
+  ['`','1','2','3','4','5','6','7','8','9','0','-','=','⌫'],
+  ['Q','W','E','R','T','Y','U','I','O','P','[',']','\\'],
+  ['A','S','D','F','G','H','J','K','L',';',"'",'↵'],
+  ['Z','X','C','V','B','N','M',',','.','/'],
+  ['SPACE'],
+];
+const WCLS={'⌫':'bs','↵':'en','SPACE':'sp'};
+const CMAP={'SPACE':' ','⌫':'BS','↵':'\n'};
+const kbEl=document.getElementById('kb');
+const allKeys=[];
+ROWS.forEach(row=>{
+  const rEl=document.createElement('div');rEl.className='row';
+  row.forEach(k=>{
+    const el=document.createElement('div');
+    el.className='key'+(WCLS[k]?' '+WCLS[k]:'');
+    const sub=k==='⌫'?'BKSP':k==='↵'?'ENTER':'';
+    el.innerHTML=`<div class="kc">${k}</div>${sub?`<div class="ks">${sub}</div>`:''}<div class="dbar"></div>`;
+    rEl.appendChild(el);allKeys.push({el,char:k});
+  });
+  kbEl.appendChild(rEl);
+});
+
+// ══════════════════════════════
+// TEXT
+// ══════════════════════════════
+let text='';
+const txtEl=document.getElementById('txt');
+const ccEl=document.getElementById('cc');
+function insert(ch){
+  if(ch==='BS')text=text.slice(0,-1);else text+=ch;
+  txtEl.textContent=text;ccEl.textContent=text.length+' chars';
+  const o=document.getElementById('out');o.classList.add('fl');setTimeout(()=>o.classList.remove('fl'),160);o.scrollTop=o.scrollHeight;
+}
+document.getElementById('clearBtn').onclick=()=>{text='';txtEl.textContent='';ccEl.textContent='0 chars';toast('Cleared');};
+document.getElementById('copyBtn').onclick=()=>{
+  navigator.clipboard.writeText(text).then(()=>toast('Copied!')).catch(()=>{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();toast('Copied!');});
+};
+
+// ══════════════════════════════
+// KEY RECTS
+// ══════════════════════════════
+let kRects=[];
+function rebuildRects(){
+  const base=document.getElementById('kbwrap').getBoundingClientRect();
+  kRects=allKeys.map(({el,char})=>{
+    const r=el.getBoundingClientRect();
+    return{el,char,lx:r.left-base.left,ty:r.top-base.top,rx:r.right-base.left,by:r.bottom-base.top,al:r.left,at:r.top,ar:r.right,ab:r.bottom};
+  });
+}
+function hitKey(x,y){for(const k of kRects)if(x>=k.lx&&x<=k.rx&&y>=k.ty&&y<=k.by)return k;return null;}
+function hitAbs(x,y){for(const k of kRects)if(x>=k.al&&x<=k.ar&&y>=k.at&&y<=k.ab)return k;return null;}
+window.addEventListener('resize',()=>{resizeDot();setTimeout(rebuildRects,80);});
+setTimeout(()=>{resizeDot();rebuildRects();},350);
+
+// ══════════════════════════════
+// PRESS
+// ══════════════════════════════
+function pressKey(kr){
+  if(!kr)return;
+  kr.el.classList.remove('hov','hov-e');
+  kr.el.querySelector('.dbar').style.width='0%';
+  kr.el.classList.add('fired');
+  setTimeout(()=>kr.el.classList.remove('fired'),130);
+  const ch=CMAP[kr.char]!==undefined?CMAP[kr.char]:kr.char;
+  insert(ch==='BS'?'BS':ch);
+}
+
+// ══════════════════════════════
+// DOT CANVAS
+// ══════════════════════════════
+const dotCvs=document.getElementById('dotCvs');
+const dctx=dotCvs.getContext('2d');
+function resizeDot(){const r=document.getElementById('kbwrap').getBoundingClientRect();dotCvs.width=r.width;dotCvs.height=r.height;}
+
+// ══════════════════════════════
+// CHIP / TOAST
+// ══════════════════════════════
+const chip=document.getElementById('chip');
+const ctxt=document.getElementById('ctxt');
+function setChip(cls,lbl){chip.className=cls;ctxt.textContent=lbl;}
+let _tt;
+function toast(m){const el=document.getElementById('toast');el.textContent=m;el.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>el.classList.remove('show'),1500);}
+
+// ══════════════════════════════
+// MODE
+// ══════════════════════════════
+let mode='hand';
+function setMode(m){
+  mode=m;
+  document.getElementById('tH').classList.toggle('on',m==='hand');
+  document.getElementById('tE').classList.toggle('on',m==='eye');
+  document.getElementById('handInfo').style.display=m==='hand'?'block':'none';
+  document.getElementById('eyeInfo').style.display=m==='eye'?'block':'none';
+  document.getElementById('gd').style.display=m==='eye'&&camLive?'block':'none';
+  allKeys.forEach(({el})=>el.classList.remove('hov','hov-e','fired'));
+  dctx.clearRect(0,0,dotCvs.width,dotCvs.height);
+  setChip('',m==='hand'?'Hand mode':'Eye mode');
+  // Switch which MP processor runs
+  activeMP=m;
+}
+let camVis=true;
+function toggleCam(){camVis=!camVis;document.getElementById('side').classList.toggle('off',!camVis);document.getElementById('camBtn').textContent=camVis?'👁 Hide Cam':'👁 Show Cam';}
+
+// ══════════════════════════════
+// SINGLE CAMERA STREAM
+// Both hand + eye MP read from same <video>
+// ══════════════════════════════
+const camVid=document.getElementById('camVid');
+const camOv=document.getElementById('camOv');
+const ovCtx=camOv.getContext('2d');
+let camLive=false;
+let activeMP='hand'; // which processor gets each frame: 'hand' | 'eye'
+
+// MediaPipe instances
+let handMP=null, faceMP=null, mpCam=null;
+
+document.getElementById('startBtn').onclick=startCamera;
+
+async function startCamera(){
+  document.getElementById('camGate').classList.add('off');
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:640},height:{ideal:480},facingMode:'user'},
+      audio:false
+    });
+    camVid.srcObject=stream;
+    await new Promise(r=>{camVid.onloadedmetadata=r;});
+    camOv.width=camVid.videoWidth||640;
+    camOv.height=camVid.videoHeight||480;
+    camLive=true;
+    initBothMP();
+  }catch(e){
+    const g=document.getElementById('camGate');g.classList.remove('off');
+    g.innerHTML=`<div class="gi">🚫</div><div class="gtitle" style="color:var(--red)">Camera blocked</div><div class="gsub">Allow camera in browser settings,<br>then reload the page.<br><br>Must be on HTTPS or localhost.</div>`;
+  }
+}
+
+function initBothMP(){
+  // ── Hands ──
+  handMP=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}`});
+  handMP.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:0.82,minTrackingConfidence:0.8});
+  handMP.onResults(onHandResults);
+
+  // ── FaceMesh with iris ──
+  faceMP=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${f}`});
+  faceMP.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:0.7,minTrackingConfidence:0.7});
+  faceMP.onResults(onFaceResults);
+
+  // ── Single Camera loop ──
+  // We alternate: each frame goes to active mode's MP
+  mpCam=new Camera(camVid,{
+    onFrame:async()=>{
+      if(activeMP==='hand'){
+        await handMP.send({image:camVid});
+      } else {
+        await faceMP.send({image:camVid});
+      }
+    },
+    width:640,height:480,
+  });
+  mpCam.start();
+
+  document.getElementById('gd').style.display=mode==='eye'?'block':'none';
+  setTimeout(()=>{resizeDot();rebuildRects();},400);
+  toast('Camera ready! Switch between Hand / Eye mode above.');
+}
+
+// ════════════════════════════════
+// HAND MODE
+// ════════════════════════════════
+const TAP_VEL=0.038,TAP_CD=700,SETTLE=4,SPCL_CD=700,VEL_WIN=3;
+const HCOLS=['#6c63ff','#00e5aa'];
+document.getElementById('tapThr').style.left=(TAP_VEL/0.08*100).toFixed(0)+'%';
+const tapFill=document.getElementById('tapFill');
+function updTapM(v){tapFill.style.width=Math.min(100,(v/0.08)*100)+'%';tapFill.style.background=v>TAP_VEL?'var(--green)':'var(--accent)';}
+function makeK(R=0.008,Q=2.5){let x=null,P=1;return z=>{if(x===null){x=z;return z;}P+=Q;const K=P/(P+R);x+=K*(z-x);P=(1-K)*P;return x;};}
+function makeHS(id){return{id,color:HCOLS[id],kx:makeK(),ky:makeK(),pY:null,vH:[],lt:0,sk:null,sc:0,hk:null,ff:false,tf:false,ls:0,sx:null,sy:null,iR:false,_t:false};}
+const HS=[makeHS(0),makeHS(1)];let ahc=0;
+
+function sHov(s,kr){if(s.hk&&s.hk!==kr){const o=HS.find(h=>h!==s);if(!o||o.hk!==s.hk)s.hk.el.classList.remove('hov');}s.hk=kr||null;if(s.hk)s.hk.el.classList.add('hov');}
+function cHov(s){if(s.hk){const o=HS.find(h=>h!==s);if(!o||o.hk!==s.hk)s.hk.el.classList.remove('hov');s.hk=null;}}
+function dTap(s,ry){if(s.pY===null){s.pY=ry;return false;}const v=ry-s.pY;s.pY=ry;s.vH.push(v);if(s.vH.length>VEL_WIN)s.vH.shift();const pk=Math.max(...s.vH);if(s.id===0)updTapM(Math.max(0,pk));const now=performance.now();if(pk>TAP_VEL&&now-s.lt>TAP_CD){s.lt=now;s.vH=[];return true;}return false;}
+function rTap(s){s.pY=null;s.vH=[];}
+function fUp(lm,t,m){return lm[t].y<lm[m].y;}
+function clsH(lm){const i=fUp(lm,8,5),m=fUp(lm,12,9),r=fUp(lm,16,13),p=fUp(lm,20,17),t=lm[4].y<lm[3].y;if(t&&i&&m&&r&&p)return'five';if(i&&m&&!r&&!p)return'two';if(i&&!m&&!r&&!p)return'point';return'idle';}
+
+function procH(s,lm){
+  const tip=lm[8],g=clsH(lm);
+  const base=document.getElementById('kbwrap').getBoundingClientRect();
+  const fx=(1-tip.x)*base.width,fy=tip.y*base.height;
+  s.sx=s.kx(fx);s.sy=s.ky(fy);s._t=false;
+  const now=performance.now();
+  if(s.id===0)document.getElementById('fPos').textContent=(s.iR?'🟢R':'🟣L')+' x:'+(s.sx|0)+' y:'+(s.sy|0);
+  if(g==='five'){cHov(s);s._t=true;if(s.iR){setChip('bspc','🖐 Backspace');if(!s.ff&&now-s.ls>SPCL_CD){s.ff=true;s.ls=now;insert('BS');toast('⌫');}}rTap(s);return;}else s.ff=false;
+  if(g==='two'){cHov(s);if(s.iR){setChip('spc','✌️ Space');if(!s.tf&&now-s.ls>SPCL_CD){s.tf=true;s.ls=now;insert(' ');toast('SPACE');}}rTap(s);return;}else s.tf=false;
+  if(g==='point'){const kr=hitKey(s.sx,s.sy);sHov(s,kr);if(s.id===0)setChip('hand','☝️ '+(kr?kr.char:'...'));if(kr!==s.sk){s.sk=kr;s.sc=0;}else if(s.sc<SETTLE)s.sc++;if(dTap(s,fy)&&kr&&s.sc>=SETTLE){s._t=true;if(s.id===0)setChip('tap','👇 TAP!');pressKey(kr);s.sc=0;toast('"'+(CMAP[kr.char]!==undefined?CMAP[kr.char]==='\n'?'↵':CMAP[kr.char]||'␣':kr.char)+'"');}return;}
+  cHov(s);if(s.id===0)setChip('','Idle');dTap(s,fy);
+}
+function rstH(s){cHov(s);s.sx=null;s.sy=null;s.ff=false;s.tf=false;s.pY=null;s.vH=[];s.sk=null;s.sc=0;s._t=false;}
+
+function drawHDots(){
+  dctx.clearRect(0,0,dotCvs.width,dotCvs.height);
+  for(const s of HS){
+    if(s.sx===null||s.id>=ahc)continue;
+    const c=s._t?'#00e676':s.color;
+    const g=dctx.createRadialGradient(s.sx,s.sy,2,s.sx,s.sy,18);
+    g.addColorStop(0,c+'bb');g.addColorStop(1,'transparent');
+    dctx.beginPath();dctx.arc(s.sx,s.sy,18,0,Math.PI*2);dctx.fillStyle=g;dctx.fill();
+    dctx.beginPath();dctx.arc(s.sx,s.sy,5,0,Math.PI*2);dctx.fillStyle=c;dctx.fill();
+    dctx.beginPath();dctx.arc(s.sx,s.sy,8,0,Math.PI*2);dctx.strokeStyle=c+'88';dctx.lineWidth=1.5;dctx.stroke();
+  }
+}
+
+let noHand=0;
+function onHandResults(res){
+  ovCtx.clearRect(0,0,camOv.width,camOv.height);
+  const det=res.multiHandLandmarks||[];ahc=det.length;
+  for(let i=det.length;i<2;i++)if(HS[i].sx!==null)rstH(HS[i]);
+  if(det.length){
+    noHand=0;
+    det.forEach((lm,i)=>{
+      const lbl=res.multiHandedness?.[i]?.label||'Left';
+      HS[i].iR=(lbl==='Left');HS[i].color=HS[i].iR?'#00e5aa':'#6c63ff';
+      if(window.drawConnectors&&window.HAND_CONNECTIONS){
+        drawConnectors(ovCtx,lm,HAND_CONNECTIONS,{color:HS[i].color+'44',lineWidth:1.5});
+        drawLandmarks(ovCtx,lm,{color:HS[i].color,lineWidth:1,radius:2});
+      }
+      procH(HS[i],lm);
+    });
+    document.getElementById('handConf').style.width=((res.multiHandedness?.[0]?.score??0.9)*100).toFixed(0)+'%';
+    if(det.length===2)setChip('hand','🙌 Both hands');
+    drawHDots();
+  }else{
+    noHand++;
+    if(noHand>10){setChip('','No hand');HS.forEach(rstH);dctx.clearRect(0,0,dotCvs.width,dotCvs.height);updTapM(0);}
+  }
+}
+
+// ════════════════════════════════
+// EYE MODE — FaceMesh iris + smooth gaze + blink
+// ════════════════════════════════
+const DWELL=1200, EYE_CD=600, EDGE=70;
+
+// ── Smooth gaze with weighted EMA (exponential moving average)
+// Alpha close to 0 = very smooth but slight lag
+// Alpha close to 1 = responsive but jittery
+// We use 0.08 — very smooth, almost no flicker
+const GAZE_ALPHA = 0.18; // more responsive
+let gsX=null, gsY=null;
+
+// ── Median buffer: collect last N raw values, take median
+// This kills sudden outlier spikes before the smoother sees them
+const MED_N = 7;
+let medBufX=[], medBufY=[];
+function median(arr){
+  const s=[...arr].sort((a,b)=>a-b);
+  const m=Math.floor(s.length/2);
+  return s.length%2?s[m]:(s[m-1]+s[m])/2;
+}
+function pushMed(x,y){
+  medBufX.push(x);medBufY.push(y);
+  if(medBufX.length>MED_N){medBufX.shift();medBufY.shift();}
+  return{x:median(medBufX),y:median(medBufY)};
+}
+
+let eHK=null,eDwS=null,eLT=0;
+let rawDX=0,rawDY=0;
+
+// ── Blink via Eye Aspect Ratio (EAR) ──
+const EAR_THRESH=0.19, BLINK_MIN=2, BLINK_MAX=10, BLINK_CD=750;
+let blinkCnt=0, lastBlink=0;
+function dist2(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2);}
+function getEAR(lm){
+  // 6-point EAR on left eye
+  const v1=dist2(lm[160],lm[144]);
+  const v2=dist2(lm[158],lm[153]);
+  const h =dist2(lm[33], lm[133]);
+  return h>0.001?(v1+v2)/(2.0*h):0.35;
+}
+
+// Calibration — stores observed iris positions at 9 known screen points
+let cal={ready:false, ixMin:0.3, ixMax:0.7, iyMin:0.3, iyMax:0.6};
+let calActive=false,calSamples=[],calStep=0,calOverlay=null;
+const CAL_PTS=[[.15,.2],[.5,.2],[.85,.2],[.15,.5],[.5,.5],[.85,.5],[.15,.8],[.5,.8],[.85,.8]];
+const gdEl=document.getElementById('gd');
+const dwFill=document.getElementById('dwFill');
+const dwPct=document.getElementById('dwPct');
+
+// Snap-to-key
+const SNAP_R=44;
+function snapKey(x,y){
+  let best=null,bestD=Infinity;
+  for(const k of kRects){
+    const cx=(k.al+k.ar)/2,cy=(k.at+k.ab)/2;
+    const d=Math.sqrt((x-cx)**2+(y-cy)**2);
+    if(d<bestD){bestD=d;best=k;}
+  }
+  if(best&&bestD<SNAP_R)return best;
+  return hitAbs(x,y);
+}
+
+// ── Gaze from raw iris position in frame ──
+// Simple & reliable: iris X/Y in normalized frame coords (0..1)
+// We auto-calibrate the min/max range from observed values
+function getRawIris(lm){
+  let ix=0, iy=0, n=0;
+  if(lm[468]){ ix+=lm[468].x; iy+=lm[468].y; n++; }
+  if(lm[473]){ ix+=lm[473].x; iy+=lm[473].y; n++; }
+  if(n===0) return null;
+  return { x: ix/n, y: iy/n };
+}
+
+// Auto-calibration: silently track min/max iris positions over time
+// After enough samples, we have the person's full gaze range
+let autoCalX = { min:1, max:0, samples:0 };
+let autoCalY = { min:1, max:0, samples:0 };
+const AUTO_CAL_SAMPLES = 150; // frames before auto-cal is ready
+const AUTO_CAL_MARGIN  = 0.15; // inset from edges to avoid extremes
+
+function updateAutoCal(x, y){
+  if(x < autoCalX.min) autoCalX.min = x;
+  if(x > autoCalX.max) autoCalX.max = x;
+  if(y < autoCalY.min) autoCalY.min = y;
+  if(y > autoCalY.max) autoCalY.max = y;
+  autoCalX.samples++;
+  autoCalY.samples++;
+}
+
+function irisToScreen(ix, iy){
+  const W = window.innerWidth, H = window.innerHeight;
+
+  let sx, sy;
+
+  if(cal.ready){
+    // Manual calibration wins
+    sx = (ix - cal.ixMin) / (cal.ixMax - cal.ixMin) * W;
+    sy = (iy - cal.iyMin) / (cal.iyMax - cal.iyMin) * H;
+  } else if(autoCalX.samples >= AUTO_CAL_SAMPLES && (autoCalX.max - autoCalX.min) > 0.01){
+    // Auto-calibration: map observed iris range to screen range
+    const xRange = autoCalX.max - autoCalX.min;
+    const yRange = autoCalY.max - autoCalY.min || 0.01;
+    const xMargin = xRange * AUTO_CAL_MARGIN;
+    const yMargin = yRange * AUTO_CAL_MARGIN;
+    // Mirror X (camera is flipped) — looking left = higher ix = left on screen
+    sx = (1 - (ix - autoCalX.min - xMargin) / (xRange - xMargin*2)) * W;
+    // Y: larger iy = looking down = lower on screen
+    sy = ((iy - autoCalY.min - yMargin) / (yRange - yMargin*2)) * H;
+  } else {
+    // Fallback before cal: use rough center-based mapping
+    // Mirror X for selfie cam
+    sx = (0.5 - (ix - 0.5)) * W * 1.6 + W * 0.5;
+    sy = (iy - 0.35) * H * 5.0;
+  }
+
+  sx = Math.max(0, Math.min(W, sx));
+  sy = Math.max(0, Math.min(H, sy));
+  return { sx, sy };
+}
+
+let noFace=0;
+function onFaceResults(res){
+  ovCtx.clearRect(0,0,camOv.width,camOv.height);
+
+  if(!res.multiFaceLandmarks||!res.multiFaceLandmarks.length){
+    noFace++;
+    if(noFace>15){ setChip('eye','👁 No face'); clearEHov(); }
+    return;
+  }
+  noFace=0;
+  const lm=res.multiFaceLandmarks[0];
+
+  // ── 1. Draw iris rings on cam overlay ──
+  const CW=camOv.width, CH=camOv.height;
+  [[468,469,'#00e5aa'],[473,474,'#a09fff']].forEach(([ci,cr,col])=>{
+    if(!lm[ci])return;
+    const cx=lm[ci].x*CW, cy=lm[ci].y*CH;
+    const rx=Math.max(Math.abs((lm[cr]?.x||lm[ci].x)*CW-cx)*2.2, 5);
+    ovCtx.beginPath(); ovCtx.arc(cx,cy,rx,0,Math.PI*2);
+    ovCtx.strokeStyle=col; ovCtx.lineWidth=2; ovCtx.stroke();
+    ovCtx.beginPath(); ovCtx.arc(cx,cy,3,0,Math.PI*2);
+    ovCtx.fillStyle=col; ovCtx.fill();
+  });
+
+  // ── 2. EAR blink detection ──
+  const earVal = getEAR(lm);
+  const closed = earVal < EAR_THRESH;
+
+  ovCtx.fillStyle = closed ? '#ff453a' : '#00e5aa';
+  ovCtx.font = 'bold 11px monospace';
+  ovCtx.fillText('EAR:'+(earVal.toFixed(2)), 5, 14);
+
+  const now = performance.now();
+  if(closed){
+    blinkCnt++;
+  } else {
+    if(blinkCnt>=BLINK_MIN && blinkCnt<=BLINK_MAX && now-lastBlink>BLINK_CD){
+      lastBlink=now; onBlink();
+    }
+    blinkCnt=0;
+  }
+
+  // Only skip gaze if eye hard-closed or manual calibrating
+  const hardClosed = blinkCnt > BLINK_MIN;
+  if(hardClosed || calActive) return;
+
+  // ── 3. Get raw iris position ──
+  const iris = getRawIris(lm);
+  if(!iris) return;
+
+  rawDX = iris.x;
+  rawDY = iris.y;
+
+  // Update auto-calibration
+  updateAutoCal(iris.x, iris.y);
+
+  // Show calibration status
+  const calPct = Math.min(100, (autoCalX.samples/AUTO_CAL_SAMPLES*100)|0);
+  document.getElementById('iOff').textContent =
+    calPct<100 ? 'Auto-cal: '+calPct+'%' :
+    'ix:'+iris.x.toFixed(3)+' iy:'+iris.y.toFixed(3);
+
+  // Vertical bar showing Y gaze
+  const barX=CW-14, barH=CH*0.6, barTop=CH*0.2;
+  ovCtx.fillStyle='#222'; ovCtx.fillRect(barX,barTop,10,barH);
+  const normY = autoCalY.samples>10 && (autoCalY.max-autoCalY.min)>0.001
+    ? (iris.y - autoCalY.min)/(autoCalY.max-autoCalY.min)
+    : (iris.y - 0.3)*3;
+  const dotBarY = barTop + barH * Math.max(0,Math.min(1,normY));
+  ovCtx.fillStyle='#00e5aa';
+  ovCtx.beginPath();
+  ovCtx.arc(barX+5, dotBarY, 5, 0, Math.PI*2);
+  ovCtx.fill();
+
+  // Auto-cal progress arc
+  if(calPct < 100){
+    ovCtx.strokeStyle='#ffd60a';
+    ovCtx.lineWidth=2;
+    ovCtx.beginPath();
+    ovCtx.arc(CW-20, 20, 8, -Math.PI/2, -Math.PI/2+(calPct/100)*Math.PI*2);
+    ovCtx.stroke();
+    ovCtx.fillStyle='#ffd60a';
+    ovCtx.font='9px monospace';
+    ovCtx.fillText(calPct+'%',CW-30,38);
+  }
+
+  // ── 4. Map iris to screen ──
+  const {sx, sy} = irisToScreen(iris.x, iris.y);
+
+  // ── 5. Median filter ──
+  const med = pushMed(sx, sy);
+
+  // ── 6. EMA smooth ──
+  if(gsX===null){ gsX=med.x; gsY=med.y; }
+  else {
+    gsX += (med.x - gsX) * GAZE_ALPHA;
+    gsY += (med.y - gsY) * GAZE_ALPHA;
+  }
+
+  gdEl.style.left = gsX+'px';
+  gdEl.style.top  = gsY+'px';
+  document.getElementById('gPos').textContent='x:'+(gsX|0)+' y:'+(gsY|0);
+
+  onEyeGaze(gsX, gsY);
+}
+
+function onBlink(){
+  if(mode!=='eye')return;
+  if(eHK){
+    eLT=performance.now();
+    const kr=eHK; clearEHov();
+    pressKey(kr);
+    dwFill.style.width='0%'; dwPct.textContent='0%';
+    const lb=CMAP[kr.char]!==undefined?CMAP[kr.char]==='\n'?'ENTER':CMAP[kr.char]||'SPACE':kr.char;
+    setChip('tap','😉 → '+lb);
+    toast('"'+lb+'" blink!');
+  } else {
+    gdEl.style.background='radial-gradient(circle,#ffd60add,#ffd60a22)';
+    setTimeout(()=>{ gdEl.style.background='radial-gradient(circle,#ff453acc,#ff453a22)'; },250);
+  }
+}
+
+function onEyeGaze(x,y){
+  rebuildRects();
+  const now=performance.now();
+  if(now-eLT<EYE_CD){ clearEHov(); dwFill.style.width='0%'; dwPct.textContent='0%'; return; }
+  let kr=null;
+  if(x<EDGE) kr=kRects.find(k=>k.char==='⌫')||null;
+  else if(x>window.innerWidth-EDGE) kr=kRects.find(k=>k.char==='SPACE')||null;
+  else kr=snapKey(x,y);
+  if(kr){
+    if(kr!==eHK){ clearEHov(); eHK=kr; eDwS=now; kr.el.classList.add('hov-e'); }
+    else {
+      const p=Math.min(100,((now-eDwS)/DWELL)*100);
+      dwFill.style.width=p+'%'; dwPct.textContent=(p|0)+'%';
+      kr.el.querySelector('.dbar').style.width=p+'%';
+      setChip('dwell','👁 '+kr.char+' '+(p|0)+'%');
+      if(p>=100){
+        eLT=now; clearEHov(); pressKey(kr);
+        dwFill.style.width='0%'; dwPct.textContent='0%';
+        const lb=CMAP[kr.char]!==undefined?CMAP[kr.char]==='\n'?'ENTER':CMAP[kr.char]||'SPACE':kr.char;
+        setChip('tap','👁 '+lb); toast('"'+lb+'"');
+      }
+    }
+  } else {
+    clearEHov(); dwFill.style.width='0%'; dwPct.textContent='0%';
+    setChip('eye','👁 ...');
+  }
+}
+function clearEHov(){
+  if(eHK){ eHK.el.classList.remove('hov-e'); eHK.el.querySelector('.dbar').style.width='0%'; eHK=null; }
+  eDwS=null;
+}
+
+function startCal(){
+  if(!camLive){toast('Start camera first!');return;}
+  calStep=0;calSamples=[];calActive=true;
+  medBufX=[];medBufY=[];gsX=null;gsY=null; // reset smoother
+  if(calOverlay)calOverlay.remove();
+  calOverlay=document.createElement('div');
+  calOverlay.style.cssText='position:fixed;inset:0;background:rgba(8,8,15,.92);z-index:600;';
+  const ttl=document.createElement('div');
+  ttl.style.cssText='position:absolute;top:16px;left:50%;transform:translateX(-50%);font-family:JetBrains Mono,monospace;font-size:.88rem;color:#f0f0ff;text-align:center;line-height:1.6;';
+  ttl.innerHTML='🎯 Eye Calibration<br><span style="font-size:.6rem;color:#5a5a7a">Look at each dot → click it → 9 points</span>';
+  calOverlay.appendChild(ttl);
+  const pg=document.createElement('div');pg.id='cpg';
+  pg.style.cssText='position:absolute;top:62px;left:50%;transform:translateX(-50%);font-size:.66rem;color:#5a5a7a;';
+  pg.textContent='0 / 9';calOverlay.appendChild(pg);
+  const sk=document.createElement('button');sk.textContent='Skip';
+  sk.style.cssText='position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#5a5a7a;border:1px solid #2a2a4a;border-radius:7px;padding:5px 13px;font-family:Inter,sans-serif;font-size:.68rem;cursor:pointer;';
+  sk.onclick=skipCal;calOverlay.appendChild(sk);
+  CAL_PTS.forEach(([fx,fy],i)=>{
+    const d=document.createElement('div');
+    d.style.cssText=`position:absolute;width:22px;height:22px;border-radius:50%;background:var(--teal);cursor:pointer;transform:translate(-50%,-50%);box-shadow:0 0 0 6px #00e5aa1a;left:${fx*100}%;top:${fy*100}%;transition:transform .1s,background .1s;`;
+    d.onmouseenter=()=>{if(!d.done)d.style.transform='translate(-50%,-50%) scale(1.5)';};
+    d.onmouseleave=()=>{if(!d.done)d.style.transform='translate(-50%,-50%) scale(1)';};
+    d.onclick=()=>{
+      if(d.done)return;d.done=true;
+      calSamples[i]={iris:{x:rawDX,y:rawDY},sx:CAL_PTS[i][0]*window.innerWidth,sy:CAL_PTS[i][1]*window.innerHeight};
+      d.style.background='#223';d.style.boxShadow='none';d.style.cursor='default';d.style.transform='translate(-50%,-50%) scale(.8)';
+      calStep++;document.getElementById('cpg').textContent=calStep+' / 9';
+      if(calStep>=9)setTimeout(finishCal,300);
+    };
+    calOverlay.appendChild(d);
+  });
+  document.body.appendChild(calOverlay);
+}
+function finishCal(){
+  calActive=false;if(calOverlay){calOverlay.remove();calOverlay=null;}
+  const v=calSamples.filter(Boolean);if(v.length<4){toast('Need more points');return;}
+  // Find min/max iris X and Y from calibration samples
+  let ixMin=1,ixMax=0,iyMin=1,iyMax=0;
+  v.forEach(s=>{
+    if(s.iris.x<ixMin)ixMin=s.iris.x;
+    if(s.iris.x>ixMax)ixMax=s.iris.x;
+    if(s.iris.y<iyMin)iyMin=s.iris.y;
+    if(s.iris.y>iyMax)iyMax=s.iris.y;
+  });
+  // Add small padding so edges are reachable
+  const px=(ixMax-ixMin)*0.1, py=(iyMax-iyMin)*0.1;
+  cal={ready:true, ixMin:ixMin-px, ixMax:ixMax+px, iyMin:iyMin-py, iyMax:iyMax+py};
+  // Also reset auto-cal
+  autoCalX={min:ixMin-px,max:ixMax+px,samples:AUTO_CAL_SAMPLES};
+  autoCalY={min:iyMin-py,max:iyMax+py,samples:AUTO_CAL_SAMPLES};
+  gsX=null;gsY=null;medBufX=[];medBufY=[];
+  toast('✅ Calibration done! Blink to type.');
+}
+function skipCal(){calActive=false;if(calOverlay){calOverlay.remove();calOverlay=null;}toast('Skipped — blink on a key!');}
+
+// ── Mouse fallback ────────────────
+document.getElementById('kbwrap').addEventListener('mousemove',e=>{
+  if(camLive)return;
+  const r=document.getElementById('kbwrap').getBoundingClientRect();
+  const x=e.clientX-r.left,y=e.clientY-r.top;
+  dctx.clearRect(0,0,dotCvs.width,dotCvs.height);
+  const g=dctx.createRadialGradient(x,y,2,x,y,18);g.addColorStop(0,'#6c63ffbb');g.addColorStop(1,'transparent');
+  dctx.beginPath();dctx.arc(x,y,18,0,Math.PI*2);dctx.fillStyle=g;dctx.fill();
+  dctx.beginPath();dctx.arc(x,y,5,0,Math.PI*2);dctx.fillStyle='#6c63ff';dctx.fill();
+  allKeys.forEach(({el})=>el.classList.remove('hov'));
+  const kr=hitKey(x,y);if(kr)kr.el.classList.add('hov');
+});
+document.getElementById('kbwrap').addEventListener('click',e=>{
+  if(camLive)return;
+  const r=document.getElementById('kbwrap').getBoundingClientRect();
+  const kr=hitKey(e.clientX-r.left,e.clientY-r.top);if(kr)pressKey(kr);
+});
+document.getElementById('kbwrap').addEventListener('mouseleave',()=>{
+  if(camLive)return;dctx.clearRect(0,0,dotCvs.width,dotCvs.height);allKeys.forEach(({el})=>el.classList.remove('hov'));
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Backspace'){insert('BS');e.preventDefault();}
+  else if(e.key==='Enter')insert('\n');
+  else if(e.key.length===1)insert(e.key);
+});
+
+setTimeout(()=>toast('Click "Start Camera" — one camera for both modes!'),600);
+</script>
+</body>
+</html>
