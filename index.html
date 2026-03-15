@@ -464,57 +464,60 @@ function onHandResults(res){
 }
 
 // ════════════════════════════════
-// EYE MODE — FaceMesh iris + smooth gaze + blink
+// EYE MODE — clean, smooth, accurate
 // ════════════════════════════════
 const DWELL=1200, EYE_CD=600, EDGE=70;
 
-// ── Smooth gaze with weighted EMA (exponential moving average)
-// Alpha close to 0 = very smooth but slight lag
-// Alpha close to 1 = responsive but jittery
-// We use 0.08 — very smooth, almost no flicker
-const GAZE_ALPHA = 0.18; // more responsive
-let gsX=null, gsY=null;
-
-// ── Median buffer: collect last N raw values, take median
-// This kills sudden outlier spikes before the smoother sees them
-const MED_N = 7;
-let medBufX=[], medBufY=[];
-function median(arr){
-  const s=[...arr].sort((a,b)=>a-b);
-  const m=Math.floor(s.length/2);
-  return s.length%2?s[m]:(s[m-1]+s[m])/2;
+// ── 1D Kalman filter ──
+function makeKal(R=0.005,Q=0.8){
+  let x=null,P=1;
+  return function(z){
+    if(x===null){x=z;return z;}
+    P+=Q;
+    const K=P/(P+R);
+    x+=K*(z-x);
+    P=(1-K)*P;
+    return x;
+  };
 }
-function pushMed(x,y){
-  medBufX.push(x);medBufY.push(y);
-  if(medBufX.length>MED_N){medBufX.shift();medBufY.shift();}
-  return{x:median(medBufX),y:median(medBufY)};
+let kalX=makeKal(), kalY=makeKal();
+
+// ── 5-point moving average for extra stability ──
+const MA=5;
+let maX=[],maY=[];
+function movAvg(bx,by,vx,vy){
+  bx.push(vx);by.push(vy);
+  if(bx.length>MA){bx.shift();by.shift();}
+  return{x:bx.reduce((a,b)=>a+b,0)/bx.length, y:by.reduce((a,b)=>a+b,0)/by.length};
 }
 
+let gsX=null,gsY=null;
 let eHK=null,eDwS=null,eLT=0;
-let rawDX=0,rawDY=0;
+let rawIX=0.5,rawIY=0.4; // raw iris position 0..1
 
-// ── Blink via Eye Aspect Ratio (EAR) ──
-const EAR_THRESH=0.19, BLINK_MIN=2, BLINK_MAX=10, BLINK_CD=750;
-let blinkCnt=0, lastBlink=0;
+// ── Blink (EAR) ──
+const EAR_THRESH=0.19,BLINK_MIN=2,BLINK_MAX=10,BLINK_CD=750;
+let blinkCnt=0,lastBlink=0;
 function dist2(a,b){return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2);}
 function getEAR(lm){
-  // 6-point EAR on left eye
   const v1=dist2(lm[160],lm[144]);
   const v2=dist2(lm[158],lm[153]);
-  const h =dist2(lm[33], lm[133]);
-  return h>0.001?(v1+v2)/(2.0*h):0.35;
+  const h=dist2(lm[33],lm[133]);
+  return h>0.001?(v1+v2)/(2*h):0.35;
 }
 
-// Calibration — stores observed iris positions at 9 known screen points
-let cal={ready:false, ixMin:0.3, ixMax:0.7, iyMin:0.3, iyMax:0.6};
+// ── Calibration: 9-point homography mapping ──
+// Stores {iris:{x,y}, screen:{x,y}} pairs
+// Uses bilinear interpolation from 9 known points
+let cal={ready:false,pts:[]};
 let calActive=false,calSamples=[],calStep=0,calOverlay=null;
-const CAL_PTS=[[.15,.2],[.5,.2],[.85,.2],[.15,.5],[.5,.5],[.85,.5],[.15,.8],[.5,.8],[.85,.8]];
+const CAL_PTS=[[.1,.15],[.5,.15],[.9,.15],[.1,.5],[.5,.5],[.9,.5],[.1,.85],[.5,.85],[.9,.85]];
 const gdEl=document.getElementById('gd');
 const dwFill=document.getElementById('dwFill');
 const dwPct=document.getElementById('dwPct');
 
-// Snap-to-key
-const SNAP_R=44;
+// ── Snap-to-nearest-key ──
+const SNAP_R=38;
 function snapKey(x,y){
   let best=null,bestD=Infinity;
   for(const k of kRects){
@@ -526,272 +529,230 @@ function snapKey(x,y){
   return hitAbs(x,y);
 }
 
-// ── Gaze from raw iris position in frame ──
-// Simple & reliable: iris X/Y in normalized frame coords (0..1)
-// We auto-calibrate the min/max range from observed values
-function getRawIris(lm){
-  let ix=0, iy=0, n=0;
-  if(lm[468]){ ix+=lm[468].x; iy+=lm[468].y; n++; }
-  if(lm[473]){ ix+=lm[473].x; iy+=lm[473].y; n++; }
-  if(n===0) return null;
-  return { x: ix/n, y: iy/n };
+// ── Get average iris position from both eyes ──
+function getIris(lm){
+  let ix=0,iy=0,n=0;
+  if(lm[468]){ix+=lm[468].x;iy+=lm[468].y;n++;}
+  if(lm[473]){ix+=lm[473].x;iy+=lm[473].y;n++;}
+  if(n===0)return null;
+  return{x:ix/n,y:iy/n};
 }
 
-// Auto-calibration: silently track min/max iris positions over time
-// After enough samples, we have the person's full gaze range
-let autoCalX = { min:1, max:0, samples:0 };
-let autoCalY = { min:1, max:0, samples:0 };
-const AUTO_CAL_SAMPLES = 150; // frames before auto-cal is ready
-const AUTO_CAL_MARGIN  = 0.15; // inset from edges to avoid extremes
+// ── Map iris → screen using calibration ──
+// Uses weighted nearest-neighbor from 9 calibration points
+function irisToScreen(ix,iy){
+  const W=window.innerWidth,H=window.innerHeight;
 
-function updateAutoCal(x, y){
-  if(x < autoCalX.min) autoCalX.min = x;
-  if(x > autoCalX.max) autoCalX.max = x;
-  if(y < autoCalY.min) autoCalY.min = y;
-  if(y > autoCalY.max) autoCalY.max = y;
-  autoCalX.samples++;
-  autoCalY.samples++;
-}
-
-function irisToScreen(ix, iy){
-  const W = window.innerWidth, H = window.innerHeight;
-
-  let sx, sy;
-
-  if(cal.ready){
-    // Manual calibration wins
-    sx = (ix - cal.ixMin) / (cal.ixMax - cal.ixMin) * W;
-    sy = (iy - cal.iyMin) / (cal.iyMax - cal.iyMin) * H;
-  } else if(autoCalX.samples >= AUTO_CAL_SAMPLES && (autoCalX.max - autoCalX.min) > 0.01){
-    // Auto-calibration: map observed iris range to screen range
-    const xRange = autoCalX.max - autoCalX.min;
-    const yRange = autoCalY.max - autoCalY.min || 0.01;
-    const xMargin = xRange * AUTO_CAL_MARGIN;
-    const yMargin = yRange * AUTO_CAL_MARGIN;
-    // Mirror X (camera is flipped) — looking left = higher ix = left on screen
-    sx = (1 - (ix - autoCalX.min - xMargin) / (xRange - xMargin*2)) * W;
-    // Y: larger iy = looking down = lower on screen
-    sy = ((iy - autoCalY.min - yMargin) / (yRange - yMargin*2)) * H;
-  } else {
-    // Fallback before cal: use rough center-based mapping
-    // Mirror X for selfie cam
-    sx = (0.5 - (ix - 0.5)) * W * 1.6 + W * 0.5;
-    sy = (iy - 0.35) * H * 5.0;
+  if(cal.ready && cal.pts.length>=4){
+    // Weighted average from all calibration points
+    // Weight = 1/distance^2 in iris space
+    let wSumX=0,wSumY=0,wSum=0;
+    for(const p of cal.pts){
+      const d2=(ix-p.ix)**2+(iy-p.iy)**2;
+      const w=1/(d2+0.0001);
+      wSumX+=p.sx*w; wSumY+=p.sy*w; wSum+=w;
+    }
+    return{sx:Math.max(0,Math.min(W,wSumX/wSum)), sy:Math.max(0,Math.min(H,wSumY/wSum))};
   }
 
-  sx = Math.max(0, Math.min(W, sx));
-  sy = Math.max(0, Math.min(H, sy));
-  return { sx, sy };
+  // Uncalibrated: mirror X, scale Y
+  // Camera is mirrored so iris moves opposite to screen X
+  const sx=Math.max(0,Math.min(W, (1-ix)*W*1.4 - W*0.2 ));
+  const sy=Math.max(0,Math.min(H, (iy-0.28)*H*4.2       ));
+  return{sx,sy};
+}
+
+// ── Auto-range tracking (passive) ──
+let aMin={x:1,y:1},aMax={x:0,y:0},aSamples=0;
+const A_MIN=120;
+function trackRange(ix,iy){
+  if(ix<aMin.x)aMin.x=ix; if(ix>aMax.x)aMax.x=ix;
+  if(iy<aMin.y)aMin.y=iy; if(iy>aMax.y)aMax.y=iy;
+  aSamples++;
 }
 
 let noFace=0;
 function onFaceResults(res){
   ovCtx.clearRect(0,0,camOv.width,camOv.height);
-
   if(!res.multiFaceLandmarks||!res.multiFaceLandmarks.length){
     noFace++;
-    if(noFace>15){ setChip('eye','👁 No face'); clearEHov(); }
+    if(noFace>15){setChip('eye','👁 No face');clearEHov();}
     return;
   }
   noFace=0;
   const lm=res.multiFaceLandmarks[0];
+  const CW=camOv.width,CH=camOv.height;
 
-  // ── 1. Draw iris rings on cam overlay ──
-  const CW=camOv.width, CH=camOv.height;
+  // Draw iris circles on cam
   [[468,469,'#00e5aa'],[473,474,'#a09fff']].forEach(([ci,cr,col])=>{
     if(!lm[ci])return;
-    const cx=lm[ci].x*CW, cy=lm[ci].y*CH;
-    const rx=Math.max(Math.abs((lm[cr]?.x||lm[ci].x)*CW-cx)*2.2, 5);
-    ovCtx.beginPath(); ovCtx.arc(cx,cy,rx,0,Math.PI*2);
-    ovCtx.strokeStyle=col; ovCtx.lineWidth=2; ovCtx.stroke();
-    ovCtx.beginPath(); ovCtx.arc(cx,cy,3,0,Math.PI*2);
-    ovCtx.fillStyle=col; ovCtx.fill();
+    const cx=lm[ci].x*CW,cy=lm[ci].y*CH;
+    const rx=Math.max(Math.abs((lm[cr]?.x||lm[ci].x)*CW-cx)*2.2,5);
+    ovCtx.beginPath();ovCtx.arc(cx,cy,rx,0,Math.PI*2);
+    ovCtx.strokeStyle=col;ovCtx.lineWidth=2;ovCtx.stroke();
+    ovCtx.beginPath();ovCtx.arc(cx,cy,3,0,Math.PI*2);ovCtx.fillStyle=col;ovCtx.fill();
   });
 
-  // ── 2. EAR blink detection ──
-  const earVal = getEAR(lm);
-  const closed = earVal < EAR_THRESH;
+  // EAR
+  const ear=getEAR(lm);
+  const closed=ear<EAR_THRESH;
+  ovCtx.fillStyle=closed?'#ff453a':'#00e5aa';
+  ovCtx.font='bold 10px monospace';
+  ovCtx.fillText('EAR:'+(ear.toFixed(2)),5,13);
 
-  ovCtx.fillStyle = closed ? '#ff453a' : '#00e5aa';
-  ovCtx.font = 'bold 11px monospace';
-  ovCtx.fillText('EAR:'+(earVal.toFixed(2)), 5, 14);
-
-  const now = performance.now();
-  if(closed){
-    blinkCnt++;
-  } else {
-    if(blinkCnt>=BLINK_MIN && blinkCnt<=BLINK_MAX && now-lastBlink>BLINK_CD){
-      lastBlink=now; onBlink();
-    }
+  const now=performance.now();
+  if(closed){blinkCnt++;}
+  else{
+    if(blinkCnt>=BLINK_MIN&&blinkCnt<=BLINK_MAX&&now-lastBlink>BLINK_CD){lastBlink=now;onBlink();}
     blinkCnt=0;
   }
+  if(blinkCnt>BLINK_MIN||calActive)return;
 
-  // Only skip gaze if eye hard-closed or manual calibrating
-  const hardClosed = blinkCnt > BLINK_MIN;
-  if(hardClosed || calActive) return;
+  // Get iris
+  const iris=getIris(lm);
+  if(!iris)return;
+  rawIX=iris.x; rawIY=iris.y;
+  trackRange(iris.x,iris.y);
 
-  // ── 3. Get raw iris position ──
-  const iris = getRawIris(lm);
-  if(!iris) return;
+  // Status
+  const pct=Math.min(100,(aSamples/A_MIN*100)|0);
+  document.getElementById('iOff').textContent=
+    cal.ready?'✅ Calibrated  ix:'+iris.x.toFixed(3):
+    pct<100?'Auto-ranging '+pct+'%':'ix:'+iris.x.toFixed(3)+' iy:'+iris.y.toFixed(3);
 
-  rawDX = iris.x;
-  rawDY = iris.y;
+  // Y bar on cam overlay
+  const bx=CW-12,bh=CH*0.55,bt=CH*0.22;
+  ovCtx.fillStyle='#1a1a2e';ovCtx.fillRect(bx,bt,8,bh);
+  const ny=aMax.y>aMin.y?(iris.y-aMin.y)/(aMax.y-aMin.y):iris.y;
+  const by2=bt+bh*Math.max(0,Math.min(1,ny));
+  ovCtx.fillStyle='#00e5aa';ovCtx.beginPath();ovCtx.arc(bx+4,by2,5,0,Math.PI*2);ovCtx.fill();
 
-  // Update auto-calibration
-  updateAutoCal(iris.x, iris.y);
-
-  // Show calibration status
-  const calPct = Math.min(100, (autoCalX.samples/AUTO_CAL_SAMPLES*100)|0);
-  document.getElementById('iOff').textContent =
-    calPct<100 ? 'Auto-cal: '+calPct+'%' :
-    'ix:'+iris.x.toFixed(3)+' iy:'+iris.y.toFixed(3);
-
-  // Vertical bar showing Y gaze
-  const barX=CW-14, barH=CH*0.6, barTop=CH*0.2;
-  ovCtx.fillStyle='#222'; ovCtx.fillRect(barX,barTop,10,barH);
-  const normY = autoCalY.samples>10 && (autoCalY.max-autoCalY.min)>0.001
-    ? (iris.y - autoCalY.min)/(autoCalY.max-autoCalY.min)
-    : (iris.y - 0.3)*3;
-  const dotBarY = barTop + barH * Math.max(0,Math.min(1,normY));
-  ovCtx.fillStyle='#00e5aa';
-  ovCtx.beginPath();
-  ovCtx.arc(barX+5, dotBarY, 5, 0, Math.PI*2);
-  ovCtx.fill();
-
-  // Auto-cal progress arc
-  if(calPct < 100){
-    ovCtx.strokeStyle='#ffd60a';
-    ovCtx.lineWidth=2;
-    ovCtx.beginPath();
-    ovCtx.arc(CW-20, 20, 8, -Math.PI/2, -Math.PI/2+(calPct/100)*Math.PI*2);
-    ovCtx.stroke();
-    ovCtx.fillStyle='#ffd60a';
-    ovCtx.font='9px monospace';
-    ovCtx.fillText(calPct+'%',CW-30,38);
+  // Cal progress ring
+  if(!cal.ready&&pct<100){
+    ovCtx.strokeStyle='#ffd60a';ovCtx.lineWidth=2;
+    ovCtx.beginPath();ovCtx.arc(CW-18,18,7,-Math.PI/2,-Math.PI/2+pct/100*Math.PI*2);ovCtx.stroke();
   }
 
-  // ── 4. Map iris to screen ──
-  const {sx, sy} = irisToScreen(iris.x, iris.y);
+  // Map iris → screen
+  const{sx,sy}=irisToScreen(iris.x,iris.y);
 
-  // ── 5. Median filter ──
-  const med = pushMed(sx, sy);
+  // Kalman filter
+  const kx=kalX(sx), ky=kalY(sy);
 
-  // ── 6. EMA smooth ──
-  if(gsX===null){ gsX=med.x; gsY=med.y; }
-  else {
-    gsX += (med.x - gsX) * GAZE_ALPHA;
-    gsY += (med.y - gsY) * GAZE_ALPHA;
-  }
+  // Moving average
+  const ma=movAvg(maX,maY,kx,ky);
 
-  gdEl.style.left = gsX+'px';
-  gdEl.style.top  = gsY+'px';
+  // Update smoothed gaze
+  if(gsX===null){gsX=ma.x;gsY=ma.y;}
+  else{gsX=gsX*0.82+ma.x*0.18; gsY=gsY*0.82+ma.y*0.18;}
+
+  gdEl.style.left=gsX+'px';
+  gdEl.style.top=gsY+'px';
   document.getElementById('gPos').textContent='x:'+(gsX|0)+' y:'+(gsY|0);
 
-  onEyeGaze(gsX, gsY);
+  onEyeGaze(gsX,gsY);
 }
 
 function onBlink(){
   if(mode!=='eye')return;
   if(eHK){
     eLT=performance.now();
-    const kr=eHK; clearEHov();
+    const kr=eHK;clearEHov();
     pressKey(kr);
-    dwFill.style.width='0%'; dwPct.textContent='0%';
+    dwFill.style.width='0%';dwPct.textContent='0%';
     const lb=CMAP[kr.char]!==undefined?CMAP[kr.char]==='\n'?'ENTER':CMAP[kr.char]||'SPACE':kr.char;
-    setChip('tap','😉 → '+lb);
-    toast('"'+lb+'" blink!');
+    setChip('tap','😉 '+lb);toast('"'+lb+'" blink!');
   } else {
     gdEl.style.background='radial-gradient(circle,#ffd60add,#ffd60a22)';
-    setTimeout(()=>{ gdEl.style.background='radial-gradient(circle,#ff453acc,#ff453a22)'; },250);
+    setTimeout(()=>{gdEl.style.background='radial-gradient(circle,#ff453acc,#ff453a22)';},250);
   }
 }
 
 function onEyeGaze(x,y){
   rebuildRects();
   const now=performance.now();
-  if(now-eLT<EYE_CD){ clearEHov(); dwFill.style.width='0%'; dwPct.textContent='0%'; return; }
+  if(now-eLT<EYE_CD){clearEHov();dwFill.style.width='0%';dwPct.textContent='0%';return;}
   let kr=null;
-  if(x<EDGE) kr=kRects.find(k=>k.char==='⌫')||null;
-  else if(x>window.innerWidth-EDGE) kr=kRects.find(k=>k.char==='SPACE')||null;
+  if(x<EDGE)kr=kRects.find(k=>k.char==='⌫')||null;
+  else if(x>window.innerWidth-EDGE)kr=kRects.find(k=>k.char==='SPACE')||null;
   else kr=snapKey(x,y);
   if(kr){
-    if(kr!==eHK){ clearEHov(); eHK=kr; eDwS=now; kr.el.classList.add('hov-e'); }
-    else {
+    if(kr!==eHK){clearEHov();eHK=kr;eDwS=now;kr.el.classList.add('hov-e');}
+    else{
       const p=Math.min(100,((now-eDwS)/DWELL)*100);
-      dwFill.style.width=p+'%'; dwPct.textContent=(p|0)+'%';
+      dwFill.style.width=p+'%';dwPct.textContent=(p|0)+'%';
       kr.el.querySelector('.dbar').style.width=p+'%';
       setChip('dwell','👁 '+kr.char+' '+(p|0)+'%');
       if(p>=100){
-        eLT=now; clearEHov(); pressKey(kr);
-        dwFill.style.width='0%'; dwPct.textContent='0%';
+        eLT=now;clearEHov();pressKey(kr);
+        dwFill.style.width='0%';dwPct.textContent='0%';
         const lb=CMAP[kr.char]!==undefined?CMAP[kr.char]==='\n'?'ENTER':CMAP[kr.char]||'SPACE':kr.char;
-        setChip('tap','👁 '+lb); toast('"'+lb+'"');
+        setChip('tap','👁 '+lb);toast('"'+lb+'"');
       }
     }
   } else {
-    clearEHov(); dwFill.style.width='0%'; dwPct.textContent='0%';
+    clearEHov();dwFill.style.width='0%';dwPct.textContent='0%';
     setChip('eye','👁 ...');
   }
 }
+
 function clearEHov(){
-  if(eHK){ eHK.el.classList.remove('hov-e'); eHK.el.querySelector('.dbar').style.width='0%'; eHK=null; }
+  if(eHK){eHK.el.classList.remove('hov-e');eHK.el.querySelector('.dbar').style.width='0%';eHK=null;}
   eDwS=null;
 }
 
 function startCal(){
   if(!camLive){toast('Start camera first!');return;}
   calStep=0;calSamples=[];calActive=true;
-  medBufX=[];medBufY=[];gsX=null;gsY=null; // reset smoother
+  kalX=makeKal();kalY=makeKal();maX=[];maY=[];gsX=null;gsY=null;
   if(calOverlay)calOverlay.remove();
   calOverlay=document.createElement('div');
-  calOverlay.style.cssText='position:fixed;inset:0;background:rgba(8,8,15,.92);z-index:600;';
+  calOverlay.style.cssText='position:fixed;inset:0;background:rgba(8,8,15,.94);z-index:600;';
   const ttl=document.createElement('div');
-  ttl.style.cssText='position:absolute;top:16px;left:50%;transform:translateX(-50%);font-family:JetBrains Mono,monospace;font-size:.88rem;color:#f0f0ff;text-align:center;line-height:1.6;';
-  ttl.innerHTML='🎯 Eye Calibration<br><span style="font-size:.6rem;color:#5a5a7a">Look at each dot → click it → 9 points</span>';
+  ttl.style.cssText='position:absolute;top:14px;left:50%;transform:translateX(-50%);font-family:JetBrains Mono,monospace;font-size:.86rem;color:#f0f0ff;text-align:center;line-height:1.7;pointer-events:none;';
+  ttl.innerHTML='🎯 Eye Calibration<br><span style="font-size:.58rem;color:#5a5a7a">Look at each dot and click it</span>';
   calOverlay.appendChild(ttl);
   const pg=document.createElement('div');pg.id='cpg';
-  pg.style.cssText='position:absolute;top:62px;left:50%;transform:translateX(-50%);font-size:.66rem;color:#5a5a7a;';
+  pg.style.cssText='position:absolute;top:60px;left:50%;transform:translateX(-50%);font-size:.65rem;color:#5a5a7a;pointer-events:none;';
   pg.textContent='0 / 9';calOverlay.appendChild(pg);
   const sk=document.createElement('button');sk.textContent='Skip';
-  sk.style.cssText='position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#5a5a7a;border:1px solid #2a2a4a;border-radius:7px;padding:5px 13px;font-family:Inter,sans-serif;font-size:.68rem;cursor:pointer;';
+  sk.style.cssText='position:absolute;bottom:14px;left:50%;transform:translateX(-50%);background:#1a1a2e;color:#5a5a7a;border:1px solid #2a2a4a;border-radius:7px;padding:5px 13px;font-family:Inter,sans-serif;font-size:.67rem;cursor:pointer;';
   sk.onclick=skipCal;calOverlay.appendChild(sk);
   CAL_PTS.forEach(([fx,fy],i)=>{
     const d=document.createElement('div');
-    d.style.cssText=`position:absolute;width:22px;height:22px;border-radius:50%;background:var(--teal);cursor:pointer;transform:translate(-50%,-50%);box-shadow:0 0 0 6px #00e5aa1a;left:${fx*100}%;top:${fy*100}%;transition:transform .1s,background .1s;`;
+    d.style.cssText=`position:absolute;width:24px;height:24px;border-radius:50%;background:#00e5aa;cursor:pointer;transform:translate(-50%,-50%);box-shadow:0 0 0 8px #00e5aa18,0 0 16px #00e5aa44;left:${fx*100}%;top:${fy*100}%;transition:transform .1s,background .12s;`;
     d.onmouseenter=()=>{if(!d.done)d.style.transform='translate(-50%,-50%) scale(1.5)';};
     d.onmouseleave=()=>{if(!d.done)d.style.transform='translate(-50%,-50%) scale(1)';};
     d.onclick=()=>{
       if(d.done)return;d.done=true;
-      calSamples[i]={iris:{x:rawDX,y:rawDY},sx:CAL_PTS[i][0]*window.innerWidth,sy:CAL_PTS[i][1]*window.innerHeight};
-      d.style.background='#223';d.style.boxShadow='none';d.style.cursor='default';d.style.transform='translate(-50%,-50%) scale(.8)';
+      // Capture multiple samples and average them for this point
+      calSamples[i]={ix:rawIX,iy:rawIY,sx:CAL_PTS[i][0]*window.innerWidth,sy:CAL_PTS[i][1]*window.innerHeight};
+      d.style.background='#1a3a2a';d.style.boxShadow='none';d.style.cursor='default';
+      d.style.transform='translate(-50%,-50%) scale(.7)';
       calStep++;document.getElementById('cpg').textContent=calStep+' / 9';
-      if(calStep>=9)setTimeout(finishCal,300);
+      if(calStep>=9)setTimeout(finishCal,400);
     };
     calOverlay.appendChild(d);
   });
   document.body.appendChild(calOverlay);
 }
+
 function finishCal(){
-  calActive=false;if(calOverlay){calOverlay.remove();calOverlay=null;}
-  const v=calSamples.filter(Boolean);if(v.length<4){toast('Need more points');return;}
-  // Find min/max iris X and Y from calibration samples
-  let ixMin=1,ixMax=0,iyMin=1,iyMax=0;
-  v.forEach(s=>{
-    if(s.iris.x<ixMin)ixMin=s.iris.x;
-    if(s.iris.x>ixMax)ixMax=s.iris.x;
-    if(s.iris.y<iyMin)iyMin=s.iris.y;
-    if(s.iris.y>iyMax)iyMax=s.iris.y;
-  });
-  // Add small padding so edges are reachable
-  const px=(ixMax-ixMin)*0.1, py=(iyMax-iyMin)*0.1;
-  cal={ready:true, ixMin:ixMin-px, ixMax:ixMax+px, iyMin:iyMin-py, iyMax:iyMax+py};
-  // Also reset auto-cal
-  autoCalX={min:ixMin-px,max:ixMax+px,samples:AUTO_CAL_SAMPLES};
-  autoCalY={min:iyMin-py,max:iyMax+py,samples:AUTO_CAL_SAMPLES};
-  gsX=null;gsY=null;medBufX=[];medBufY=[];
-  toast('✅ Calibration done! Blink to type.');
+  calActive=false;
+  if(calOverlay){calOverlay.remove();calOverlay=null;}
+  const v=calSamples.filter(Boolean);
+  if(v.length<4){toast('Need more calibration points');return;}
+  cal={ready:true, pts: v.map(s=>({ix:s.ix,iy:s.iy,sx:s.sx,sy:s.sy}))};
+  kalX=makeKal();kalY=makeKal();maX=[];maY=[];gsX=null;gsY=null;
+  toast('✅ Calibrated! Blink to type or dwell 1.2s.');
 }
-function skipCal(){calActive=false;if(calOverlay){calOverlay.remove();calOverlay=null;}toast('Skipped — blink on a key!');}
+
+function skipCal(){
+  calActive=false;
+  if(calOverlay){calOverlay.remove();calOverlay=null;}
+  toast('Skipped — look at a key, blink to type!');
+}
+
 
 // ── Mouse fallback ────────────────
 document.getElementById('kbwrap').addEventListener('mousemove',e=>{
